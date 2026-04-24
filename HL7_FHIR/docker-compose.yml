@@ -1,0 +1,47 @@
+services:
+  hapi-fhir-jpaserver-start:
+    image: hapiproject/hapi:latest
+    container_name: hapi-fhir-jpaserver-start
+    restart: on-failure
+    environment:
+      JAVA_TOOL_OPTIONS: "-Xms1g -Xmx6g"
+      hapi.fhir.max_bundle_size: "25000"
+      server.tomcat.max-http-form-post-size: "200MB"
+      spring.servlet.multipart.max-request-size: "200MB"
+      spring.servlet.multipart.max-file-size: "200MB"
+    ports:
+      - "8081:8080"
+    volumes:
+      - ./hapi.application.yaml:/app/config/application.yaml:ro
+    # Uncomment to enable periodic health checks.
+    # Can also be run manually: docker exec hapi-fhir-jpaserver-start java -cp /app HealthCheck
+    # healthcheck:
+    #   test: ["CMD", "java", "-cp", "/app", "HealthCheck"]
+    #   interval: 30s
+    #   timeout: 10s
+    #   start_period: 60s
+    #   retries: 3
+    depends_on:
+      hapi-fhir-postgres:
+        condition: service_healthy
+  hapi-fhir-postgres:
+    image: postgres:16-alpine
+    container_name: hapi-fhir-postgres
+    restart: always
+    environment:
+      POSTGRES_DB: "hapi"
+      POSTGRES_USER: "admin"
+      POSTGRES_PASSWORD: "admin"
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "sh -c 'pg_isready -U admin -d hapi' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      start_period: 5s
+      retries: 5
+    volumes:
+      - hapi-fhir-postgres:/var/lib/postgresql/data
+
+volumes:
+  hapi-fhir-postgres:

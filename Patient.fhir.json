@@ -1,0 +1,33 @@
+{
+    "resourceType": "Patient",
+    "identifier": [
+        {
+            "use": "official",
+            "type": {
+                "coding": [
+                    {
+                        "system": "http://terminology.hl7.org/CodeSystem/v2-0203",
+                        "code": "PPN",
+                        "display": "Passport number"
+                    }
+                ],
+                "text": "Số hộ chiếu"
+            },
+            "value": "0123456789"
+        }
+    ],
+    "name": [
+        {
+            "use": "official",
+            "text": "Van A Nguyen",
+            "family": "Nguyen",
+            "given": [
+                "Van",
+                "A"
+            ]
+        }
+    ],
+    "gender": "male",
+    "birthDate": "1990-01-01"
+
+}
