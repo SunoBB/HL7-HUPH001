@@ -14,6 +14,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import asyncio
 import click
 import logging
 
@@ -775,6 +776,219 @@ def register_mcp_tools(mcp: FastMCP) -> None:
                 "Unexpected error occurred while reading user resource. Caused by, ",
                 exc_info=ex,
             )
+        return await get_operation_outcome_exception()
+
+    @mcp.tool(
+        description=(
+            "Thống kê tỷ lệ phần trăm người bệnh nam, nữ trên tổng số người bệnh (Patient). "
+            "Truy vấn tài nguyên Patient trên FHIR server để đếm số lượng theo từng giới tính "
+            "và tính tỷ lệ phần trăm tương ứng. Không cần tham số đầu vào."
+        )
+    )
+    async def get_patient_gender_statistics() -> Annotated[
+        Dict[str, Any],
+        Field(
+            description=(
+                "Thống kê giới tính người bệnh: tổng số (total), số nam (male), "
+                "số nữ (female), số khác/không xác định (other_or_unknown), "
+                "và tỷ lệ phần trăm (percentage) tương ứng."
+            )
+        ),
+    ]:
+        try:
+            logger.debug("Invoked get_patient_gender_statistics")
+            client: AsyncFHIRClient = await get_async_fhir_client()
+
+            total_bundle, male_bundle, female_bundle = await asyncio.gather(
+                client.resources("Patient").search(Raw(**{"_summary": "count"})).fetch_raw(),
+                client.resources("Patient").search(Raw(**{"gender": "male", "_summary": "count"})).fetch_raw(),
+                client.resources("Patient").search(Raw(**{"gender": "female", "_summary": "count"})).fetch_raw(),
+            )
+
+            total = total_bundle.get("total", 0)
+            male_count = male_bundle.get("total", 0)
+            female_count = female_bundle.get("total", 0)
+            other_count = total - male_count - female_count
+
+            def pct(count: int) -> float:
+                return round(count / total * 100, 2) if total > 0 else 0.0
+
+            return {
+                "total": total,
+                "male": {"count": male_count, "percentage": pct(male_count)},
+                "female": {"count": female_count, "percentage": pct(female_count)},
+                "other_or_unknown": {"count": other_count, "percentage": pct(other_count)},
+            }
+        except ValueError as ex:
+            logger.exception("Permission error in get_patient_gender_statistics.", exc_info=ex)
+            return await get_operation_outcome(
+                code="forbidden",
+                diagnostics="The user does not have the rights to access Patient resources.",
+            )
+        except Exception as ex:
+            logger.exception("Error in get_patient_gender_statistics.", exc_info=ex)
+        return await get_operation_outcome_exception()
+
+    @mcp.tool(
+        description=(
+            "Lấy danh sách tất cả các thuốc được kê đơn (MedicationRequest) cho người bệnh theo ID. "
+            "Tìm kiếm toàn bộ đơn thuốc liên kết với một bệnh nhân cụ thể trên FHIR server."
+        )
+    )
+    async def get_medications_by_patient_id(
+        patient_id: Annotated[
+            str,
+            Field(
+                description="ID logic của người bệnh (Patient resource ID).",
+                examples=["123", "patient-456"],
+            ),
+        ],
+    ) -> Annotated[
+        Dict[str, Any],
+        Field(description="Bundle chứa danh sách các MedicationRequest của người bệnh."),
+    ]:
+        try:
+            logger.debug(f"get_medications_by_patient_id: patient_id={patient_id}")
+            if not patient_id:
+                return await get_operation_outcome_required_error("patient_id")
+            client: AsyncFHIRClient = await get_async_fhir_client()
+            bundle = await client.resources("MedicationRequest").search(
+                Raw(**{"patient": patient_id})
+            ).fetch_raw()
+            return await get_bundle_entries(bundle=bundle)
+        except ValueError as ex:
+            logger.exception("Permission error in get_medications_by_patient_id.", exc_info=ex)
+            return await get_operation_outcome(
+                code="forbidden",
+                diagnostics="The user does not have the rights to access MedicationRequest resources.",
+            )
+        except OperationOutcome as ex:
+            logger.exception("OperationOutcome in get_medications_by_patient_id.", exc_info=ex)
+            return ex.resource["issue"] or await get_operation_outcome_exception()
+        except Exception as ex:
+            logger.exception("Error in get_medications_by_patient_id.", exc_info=ex)
+        return await get_operation_outcome_exception()
+
+    @mcp.tool(
+        description=(
+            "Lấy danh sách tất cả các thủ thuật và phẫu thuật (Procedure) được thực hiện cho người bệnh theo ID. "
+            "Tìm kiếm toàn bộ can thiệp lâm sàng liên kết với một bệnh nhân cụ thể trên FHIR server."
+        )
+    )
+    async def get_procedures_by_patient_id(
+        patient_id: Annotated[
+            str,
+            Field(
+                description="ID logic của người bệnh (Patient resource ID).",
+                examples=["123", "patient-456"],
+            ),
+        ],
+    ) -> Annotated[
+        Dict[str, Any],
+        Field(description="Bundle chứa danh sách các Procedure của người bệnh."),
+    ]:
+        try:
+            logger.debug(f"get_procedures_by_patient_id: patient_id={patient_id}")
+            if not patient_id:
+                return await get_operation_outcome_required_error("patient_id")
+            client: AsyncFHIRClient = await get_async_fhir_client()
+            bundle = await client.resources("Procedure").search(
+                Raw(**{"patient": patient_id})
+            ).fetch_raw()
+            return await get_bundle_entries(bundle=bundle)
+        except ValueError as ex:
+            logger.exception("Permission error in get_procedures_by_patient_id.", exc_info=ex)
+            return await get_operation_outcome(
+                code="forbidden",
+                diagnostics="The user does not have the rights to access Procedure resources.",
+            )
+        except OperationOutcome as ex:
+            logger.exception("OperationOutcome in get_procedures_by_patient_id.", exc_info=ex)
+            return ex.resource["issue"] or await get_operation_outcome_exception()
+        except Exception as ex:
+            logger.exception("Error in get_procedures_by_patient_id.", exc_info=ex)
+        return await get_operation_outcome_exception()
+
+    @mcp.tool(
+        description=(
+            "Lấy tất cả quan sát lâm sàng (Observation) của người bệnh theo ID. "
+            "Bao gồm kết quả xét nghiệm, dấu hiệu sinh tồn, và các chỉ số lâm sàng khác "
+            "liên kết với một bệnh nhân cụ thể trên FHIR server."
+        )
+    )
+    async def get_observations_by_patient_id(
+        patient_id: Annotated[
+            str,
+            Field(
+                description="ID logic của người bệnh (Patient resource ID).",
+                examples=["123", "patient-456"],
+            ),
+        ],
+    ) -> Annotated[
+        Dict[str, Any],
+        Field(description="Bundle chứa danh sách các Observation của người bệnh."),
+    ]:
+        try:
+            logger.debug(f"get_observations_by_patient_id: patient_id={patient_id}")
+            if not patient_id:
+                return await get_operation_outcome_required_error("patient_id")
+            client: AsyncFHIRClient = await get_async_fhir_client()
+            bundle = await client.resources("Observation").search(
+                Raw(**{"patient": patient_id})
+            ).fetch_raw()
+            return await get_bundle_entries(bundle=bundle)
+        except ValueError as ex:
+            logger.exception("Permission error in get_observations_by_patient_id.", exc_info=ex)
+            return await get_operation_outcome(
+                code="forbidden",
+                diagnostics="The user does not have the rights to access Observation resources.",
+            )
+        except OperationOutcome as ex:
+            logger.exception("OperationOutcome in get_observations_by_patient_id.", exc_info=ex)
+            return ex.resource["issue"] or await get_operation_outcome_exception()
+        except Exception as ex:
+            logger.exception("Error in get_observations_by_patient_id.", exc_info=ex)
+        return await get_operation_outcome_exception()
+
+    @mcp.tool(
+        description=(
+            "Lấy dữ liệu chẩn đoán bệnh (Condition) của người bệnh theo ID. "
+            "Bao gồm tất cả các chẩn đoán và tình trạng bệnh lý được ghi nhận "
+            "cho một bệnh nhân cụ thể trên FHIR server."
+        )
+    )
+    async def get_conditions_by_patient_id(
+        patient_id: Annotated[
+            str,
+            Field(
+                description="ID logic của người bệnh (Patient resource ID).",
+                examples=["123", "patient-456"],
+            ),
+        ],
+    ) -> Annotated[
+        Dict[str, Any],
+        Field(description="Bundle chứa danh sách các Condition (chẩn đoán bệnh) của người bệnh."),
+    ]:
+        try:
+            logger.debug(f"get_conditions_by_patient_id: patient_id={patient_id}")
+            if not patient_id:
+                return await get_operation_outcome_required_error("patient_id")
+            client: AsyncFHIRClient = await get_async_fhir_client()
+            bundle = await client.resources("Condition").search(
+                Raw(**{"patient": patient_id})
+            ).fetch_raw()
+            return await get_bundle_entries(bundle=bundle)
+        except ValueError as ex:
+            logger.exception("Permission error in get_conditions_by_patient_id.", exc_info=ex)
+            return await get_operation_outcome(
+                code="forbidden",
+                diagnostics="The user does not have the rights to access Condition resources.",
+            )
+        except OperationOutcome as ex:
+            logger.exception("OperationOutcome in get_conditions_by_patient_id.", exc_info=ex)
+            return ex.resource["issue"] or await get_operation_outcome_exception()
+        except Exception as ex:
+            logger.exception("Error in get_conditions_by_patient_id.", exc_info=ex)
         return await get_operation_outcome_exception()
 
 
